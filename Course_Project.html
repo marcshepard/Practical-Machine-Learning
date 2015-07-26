@@ -75,24 +75,28 @@ img {
 <ol style="list-style-type: decimal">
 <li>Figuring out how to clean the data properly (which was a prereq for generating a decent model) took a huge chuck of time (for me, this was the hardest part of the assignment).</li>
 <li>Of the three models; Boosting and Random Forest were highly accurate, and Single Tree much less so.</li>
-<li>These models can take a ridiculously long time to train on large datasets, but they don’t need that much data to produce accurate models. I was able to strike a balance and creat a very accurate model on a small subset of the training data (and use the rest of the training data for cross-validation)</li>
+<li>These models can take a ridiculously long time to train on large datasets, but they don’t need that much data to produce accurate models. I was able to strike a balance, appropriate for this assigment,that create a very accurate model fit on a small subset of the training data (and use the rest of the training data for cross-validation), If this were for work, I’d use more of the dataset to train on and get an even more accurate fit by running this overnight.</li>
+<li>The estimated error during training, cross validation, and final testing are all in-line with each other for all three models</li>
 </ol>
 </div>
 <div id="loading-and-cleaning-data" class="section level1">
 <h1>Loading and cleaning data</h1>
 <p>We first load the libraries we need (swallowing warnings)</p>
-<pre class="r"><code>library (doParallel)
+<pre class="r"><code># Loading the libraries here and swallowing the output and warning messages
+library (doParallel)
 library (caret)
 library (randomForest)
 library (rpart)
 library (gbm)
-library (plyr)</code></pre>
+library (plyr)
+#setwd (&quot;GitHub/Practical-Machine-Learning&quot;)</code></pre>
 <p>We next load the training data and parition it into training and cross-validation sets. There are several things to note here:</p>
 <ol style="list-style-type: decimal">
 <li>Loading the dataset into Excel, one can see that it uses both the string “NA”&quot; and the emptry string for missing values. It also contains a few “#DIV/0!” strings. So when we load the dataset we need to take care to identify these as being NAs.</li>
 <li>There are about 160 columns initially, but 100 of them have mostly NAs. Removing these noisy columns is necessary to generate a model.</li>
-<li>I also had to strip out the first column (called “X”) which was just a counter. If I don’t do that, the models use it (which makes no sense), and produce good accuracy on the cross-validation set but fail misserably on the test set (predict all A’s). It took me a very long to figure this out…</li>
-<li>Using a small p value in createDataPartition strikes a good balance between accuracy (95%+) and model training time (minutes - not hours).</li>
+<li>I also had to strip out the first column (called “X”) which was just a counter. If I don’t do that, the models use it (which makes no sense), and produce good accuracy on the cross-validation set but fail misserably on the test set (predict all A’s). It took me a very long to figure this out. And this goes to show that cross-validation is not necessarily a great predictor of future predictions.</li>
+<li>Using a small p value in createDataPartition strikes a good balance between accuracy (95%+) and model training time (minutes - not hours or days).</li>
+<li>Because the training data is relatively small, the model fit underestimates the accuracy of the out-of-model predictions (cross validation and test sets)</li>
 </ol>
 <pre class="r"><code># Read in training dataset, making sure to parse missing values correctly
 df &lt;- read.csv(&quot;pml-training.csv&quot;, na.strings = c(&quot;NA&quot;, &quot;&quot;, &quot;#DIV/0!&quot;))
@@ -107,16 +111,16 @@ df &lt;- df[,-1]
 
 # Create training and cross-validation partitions - a small training partition generates
 # an accurate model in a reasonable amount of time
-inTrain &lt;- createDataPartition (y=df$classe, p=.1, list=FALSE)
+inTrain &lt;- createDataPartition (y=df$classe, p=.15, list=FALSE)
 train&lt;-df[inTrain,]
 validation&lt;-df[-inTrain,]
 
 dim(train)</code></pre>
-<pre><code>## [1] 1964   59</code></pre>
+<pre><code>## [1] 2946   59</code></pre>
 <p>Note: You can see from the output of the dim statements above that, compared to the raw training data loaded from the csv (df), the cleaned up training data set (train) has much fewer columns (since “X” and mostly-NA columns were removed) and rows (since p is small)</p>
 </div>
-<div id="training" class="section level1">
-<h1>Training</h1>
+<div id="training-and-error-estimation" class="section level1">
+<h1>Training and Error Estimation</h1>
 <p>We generate fits for several models. The first one is a CART (single tree) model, which has poor accuracy on the validation set:</p>
 <pre class="r"><code># Set seed to make this reproducable
 set.seed (90210)
@@ -124,58 +128,61 @@ set.seed (90210)
 # Training goes much faster if you use two cores
 registerDoParallel(cores=2)
 
-# Fit a CART model
+# Fit a CART (single tree) model
 mTree &lt;-train(classe~., data=train, method=&quot;rpart&quot;)
 
-# Note: Accuracy is not good on the validation set
+# The accuracy (a measure of error rate) seen during model fit is not good
+mean (mTree$results$Accuracy) * 100</code></pre>
+<pre><code>## [1] 47.40458</code></pre>
+<pre class="r"><code># Accuracy on the validation set is better, but still poor
 confusionMatrix(predict(mTree,validation), validation$classe)$overall[&quot;Accuracy&quot;] * 100</code></pre>
 <pre><code>## Accuracy 
-## 57.15823</code></pre>
+## 56.54833</code></pre>
 <p>We next use a Random Forest, which has great accuracy:</p>
 <pre class="r"><code># Fit a Random Forest model
 mRf &lt;-train(classe~., data=train, method=&quot;rf&quot;, prox=TRUE)
 
 # The accuracy predicted in the model fit is pretty good
 mean(mRf$results$Accuracy) * 100</code></pre>
-<pre><code>## [1] 96.6812</code></pre>
-<pre class="r"><code># And the accuracy of the model on the cross-validation set (which has been unused during training, so should be a good proxy for future predictions) is even better:
+<pre><code>## [1] 97.17115</code></pre>
+<pre class="r"><code># And the accuracy of the model on the cross-validation set (which has been unused during training, so should be a good proxy for future predictions) is great:
 confusionMatrix(predict(mRf,validation), validation$classe)$table</code></pre>
 <pre><code>##           Reference
 ## Prediction    A    B    C    D    E
-##          A 5014   12    0    0    0
-##          B    8 3375   62    0    0
-##          C    0   26 2993   40    0
-##          D    0    4   24 2854   18
-##          E    0    0    0    0 3228</code></pre>
+##          A 4740   26    0    0    0
+##          B    3 3192   77    0    0
+##          C    0    6 2820   39    1
+##          D    0    3   11 2694   26
+##          E    0    0    0    0 3038</code></pre>
 <pre class="r"><code>confusionMatrix(predict(mRf,validation), validation$classe)$overall[&quot;Accuracy&quot;] * 100</code></pre>
 <pre><code>## Accuracy 
-## 98.89002</code></pre>
+## 98.86663</code></pre>
 <p>We finally use Stochastic Gradient Boosting, which also has great accuracy:</p>
 <pre class="r"><code># Fit a GBM model
 mGbm &lt;-train(classe~., data=train, method=&quot;gbm&quot;, verbose=FALSE)
 
 # The accuracy predicted in the model fit is pretty good
 mean (mGbm$results$Accuracy)</code></pre>
-<pre><code>## [1] 0.9240584</code></pre>
-<pre class="r"><code># But the accuracy of the model on the cross-validation set (which has been unused during training, so should be a good proxy for future predictions) is even better:
+<pre><code>## [1] 0.9374341</code></pre>
+<pre class="r"><code># But the accuracy of the model on the cross-validation set (which has been unused during training, so should be a good proxy for future predictions) is great:
 confusionMatrix(predict(mGbm,validation), validation$classe)$table</code></pre>
 <pre><code>##           Reference
 ## Prediction    A    B    C    D    E
-##          A 5005   13    0    0    0
-##          B   17 3366   46    0    4
-##          C    0   24 3007   27    1
-##          D    0   14   26 2865   13
-##          E    0    0    0    2 3228</code></pre>
+##          A 4736    2    0    0    0
+##          B    7 3205    5    2    3
+##          C    0    6 2886   30    0
+##          D    0   14   17 2689   20
+##          E    0    0    0   12 3042</code></pre>
 <pre class="r"><code>confusionMatrix(predict(mGbm,validation), validation$classe)$overall[&quot;Accuracy&quot;] * 100</code></pre>
 <pre><code>## Accuracy 
-## 98.94099</code></pre>
+##  99.2924</code></pre>
 </div>
 <div id="final-testing-and-summary" class="section level1">
 <h1>Final Testing and Summary</h1>
 <p>As a final step, we predict results from the test set with each model:</p>
 <pre class="r"><code>test &lt;- read.csv(&quot;pml-testing.csv&quot;, na.strings = c(&quot;NA&quot;, &quot;&quot;, &quot;#DIV/0!&quot;))
 predict(mTree,test)</code></pre>
-<pre><code>##  [1] A A A A A C C C A A A C C A C C A A A C
+<pre><code>##  [1] B A C A A C C C A A C C B A C B B B B B
 ## Levels: A B C D E</code></pre>
 <pre class="r"><code>predict(mRf,test)</code></pre>
 <pre><code>##  [1] B A B A A E D B A A B C B A E E A B B B
@@ -185,10 +192,10 @@ predict(mTree,test)</code></pre>
 ## Levels: A B C D E</code></pre>
 <p>Some things to note:</p>
 <ol style="list-style-type: decimal">
-<li>The random forest and boosting models typically agree (although I’ve had runs with different starting seeds in which they differ by one).</li>
-<li>And (after I stripped out the “X” column:)), they generally produce the right results. With different starting seeds, they have given me either 95% or 100% correct results).</li>
+<li>The random forest and boosting models typically agree (although I’ve had runs with different starting seeds and smaller training set sizes I’ve seen them differ by one).</li>
+<li>And (after I stripped out the “X” column:)), they generally produce the right results (100% accuracy). Although with different starting seeds and smaller training set sizes, I’ve seen them off by one (95% right).</li>
 <li>As you can also see,the CART model has much different results (and similarly poor accuracy).</li>
-<li>Overall, the accuracy predictions from the model fit, cross-validation, and final testing all seem to be inline with each other.</li>
+<li>Overall, the accuracy predictions from the model fit, cross-validation, and final testing all seem to be inline with each other. With model fit, using a slightly undersized training set, seems to slightly under-predict the actual out-of-training-set prediction accuracy.</li>
 </ol>
 </div>
 
