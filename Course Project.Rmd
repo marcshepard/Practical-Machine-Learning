@@ -1,0 +1,124 @@
+---
+title: "Barbell lifting"
+author: "Marc Shepard"
+date: "Sunday, July 26, 2015"
+output: html_document
+---
+
+# Overview
+In this assignment, we use machine learning to predict if barbells were lifted correctly or not based on statistics that can be collected from commercial fitness devices.
+
+The test and training datasets were collected from a group of people who were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+I built three models to predict the "classe" variable (how the lift was done) from other variables. The lessons learned from this were:
+
+1. Figuring out how to clean the data properly (which was a prereq for generating a decent model) took a huge chuck of time (for me, this was the hardest part of the assignment).
+2. Of the three models; Boosting and Random Forest were highly accurate, and Single Tree much less so.
+3. These models can take a ridiculously long time to train on large datasets, but they don't need that much data to produce accurate models. I was able to strike a balance and creat a very accurate model on a small subset of the training data (and use the rest of the training data for cross-validation)
+
+# Loading and cleaning data
+```{r hide_library_warnings, echo=FALSE, message=FALSE, warning=FALSE}
+# Loading the libraries here and swallowing the output and warning messages, then load them again later to get a cleaner report
+library (doParallel)
+library (caret)
+library (randomForest)
+library (rpart)
+library (gbm)
+library (plyr)
+#setwd ("GitHub/Practical-Machine-Learning")
+```
+
+We first load the libraries we need (swallowing warnings)
+```{r load_libraries}
+library (doParallel)
+library (caret)
+library (randomForest)
+library (rpart)
+library (gbm)
+library (plyr)
+```
+
+We next load the training data and parition it into training and cross-validation sets. There are several things to note here:
+
+1. Loading the dataset into Excel, one can see that it uses both the string "NA"" and the emptry string for missing values. It also contains a few "#DIV/0!" strings. So when we load the dataset we need to take care to identify these as being NAs.
+2. There are about 160 columns initially, but 100 of them have mostly NAs. Removing these noisy columns is necessary to generate a model.
+3. I also had to strip out the first column (called "X") which was just a counter. If I don't do that, the models use it (which makes no sense), and produce good accuracy on the cross-validation set but fail misserably on the test set (predict all A's). It took me a very long to figure this out...
+4. Using a small p value in createDataPartition strikes a good balance between accuracy (95%+) and model training time (minutes - not hours).
+```{r load_data}
+# Read in training dataset, making sure to parse missing values correctly
+df <- read.csv("pml-training.csv", na.strings = c("NA", "", "#DIV/0!"))
+dim(df)
+
+# Remove columns that are mostly NA's (there are a lot of them - 100 out of 160)
+df <- df[, colSums(is.na(df)) < .5 * nrow(df)]
+
+# Also remove the first column ("X" - which is just a row counter), since if I leave X in then
+# my model and cross-validation stats look great, but it predicts all A's on the test set
+df <- df[,-1]
+
+# Create training and cross-validation partitions - a small training partition generates
+# an accurate model in a reasonable amount of time
+inTrain <- createDataPartition (y=df$classe, p=.1, list=FALSE)
+train<-df[inTrain,]
+validation<-df[-inTrain,]
+
+dim(train)
+```
+Note: You can see from the output of the dim statements above that, compared to the raw training data loaded from the csv (df), the cleaned up training data set (train) has much fewer columns (since "X" and mostly-NA columns were removed) and rows (since p is small)
+
+# Training
+We generate fits for several models. The first one is a CART (single tree) model, which has poor accuracy on the validation set:
+```{r train_CART}
+# Set seed to make this reproducable
+set.seed (90210)
+
+# Training goes much faster if you use two cores
+registerDoParallel(cores=2)
+
+# Fit a CART model
+mTree <-train(classe~., data=train, method="rpart")
+
+# Note: Accuracy is not good on the validation set
+confusionMatrix(predict(mTree,validation), validation$classe)$overall["Accuracy"] * 100
+```
+
+We next use a Random Forest, which has great accuracy:
+```{r train_RF}
+# Fit a Random Forest model
+mRf <-train(classe~., data=train, method="rf", prox=TRUE)
+
+# The accuracy predicted in the model fit is pretty good
+mean(mRf$results$Accuracy) * 100
+
+# And the accuracy of the model on the cross-validation set (which has been unused during training, so should be a good proxy for future predictions) is even better:
+confusionMatrix(predict(mRf,validation), validation$classe)$table
+confusionMatrix(predict(mRf,validation), validation$classe)$overall["Accuracy"] * 100
+```
+
+We finally use Stochastic Gradient Boosting, which also has great accuracy:
+```{r train_GBM}
+# Fit a GBM model
+mGbm <-train(classe~., data=train, method="gbm", verbose=FALSE)
+
+# The accuracy predicted in the model fit is pretty good
+mean (mGbm$results$Accuracy)
+
+# But the accuracy of the model on the cross-validation set (which has been unused during training, so should be a good proxy for future predictions) is even better:
+confusionMatrix(predict(mGbm,validation), validation$classe)$table
+confusionMatrix(predict(mGbm,validation), validation$classe)$overall["Accuracy"] * 100
+```
+
+# Final Testing and Summary
+As a final step, we predict results from the test set with each model:
+```{r test_models}
+test <- read.csv("pml-testing.csv", na.strings = c("NA", "", "#DIV/0!"))
+predict(mTree,test)
+predict(mRf,test)
+predict(mGbm,test)
+```
+Some things to note:
+
+1. The random forest and boosting models typically agree (although I've had runs with different starting seeds in which they differ by one).
+2. And (after I stripped out the "X" column:)), they generally produce the right results. With different starting seeds, they have given me either 95% or 100% correct results).
+3. As you can also see,the CART model has much different results (and similarly poor accuracy).
+4. Overall, the accuracy predictions from the model fit, cross-validation, and final testing all seem to be inline with each other.
